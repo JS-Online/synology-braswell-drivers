@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -13,21 +13,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev bc flex bison libelf-dev xz-utils
+          sudo apt-get install -y build-essential libssl-dev bc flex bison \
+            libelf-dev xz-utils gcc-9 g++-9
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
 
       - name: Download Synology Braswell kernel source
         run: |
           wget -q "https://global.synologydownload.com/download/ToolChain/Synology%20NAS%20GPL%20Source/7.2-64570/braswell/linux-3.10.x.txz" -O linux-3.10.x.txz
           tar xf linux-3.10.x.txz
 
-      - name: Build USB serial modules
+      - name: Prepare kernel
         run: |
           cd linux-3.10.x
           cp synoconfigs/braswell .config
-          make ARCH=x86_64 oldconfig < /dev/null
-          make ARCH=x86_64 prepare
-          make ARCH=x86_64 scripts
-          make ARCH=x86_64 M=drivers/usb/serial modules
+          make ARCH=x86_64 CC=gcc-9 oldconfig < /dev/null
+          make ARCH=x86_64 CC=gcc-9 prepare
+          make ARCH=x86_64 CC=gcc-9 scripts
+
+      - name: Build USB serial modules
+        run: |
+          cd linux-3.10.x
+          make ARCH=x86_64 CC=gcc-9 M=drivers/usb/serial modules
 
       - name: Collect modules
         run: |
