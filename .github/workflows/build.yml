@@ -36,10 +36,17 @@ jobs:
           cd linux-3.10.x
           make ARCH=x86_64 CC=gcc-9 M=drivers/usb/serial modules
 
+      - name: Build Bluetooth modules  
+        run: |
+          cd linux-3.10.x
+          make ARCH=x86_64 CC=gcc-9 M=drivers/bluetooth modules
+
       - name: Collect modules
         run: |
           mkdir -p output
           find linux-3.10.x/drivers/usb/serial -name "*.ko" -exec cp {} output/ \;
+          find linux-3.10.x/drivers/bluetooth -name "*.ko" -exec cp {} output/ \;
+          find linux-3.10.x/net/bluetooth -name "*.ko" -exec cp {} output/ \;
           ls -la output/
 
       - name: Upload artifacts
