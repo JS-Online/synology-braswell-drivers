@@ -1,0 +1,128 @@
+name: Build Bluetooth Modules for Synology Braswell (3.10.108)
+
+on:
+  workflow_dispatch:  # Manuell auslösen
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.18
+
+    steps:
+      # ======================================================================
+      # 1. ABHÄNGIGKEITEN INSTALLIEREN
+      # ======================================================================
+      - name: Install dependencies
+        run: |
+          apk add --no-cache \
+            git \
+            make \
+            g++ \
+            linux-headers \
+            bc \
+            bison \
+            flex \
+            libelf-dev \
+            zlib-dev \
+            python3 \
+            py3-pip \
+            wget \
+            tar \
+            xz
+
+      # ======================================================================
+      # 2. REPOSITORY AUSCHECKEN
+      # ======================================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ======================================================================
+      # 3. SYNOLOGY TOOLCHAIN (BRASWELL) HERUNTERLADEN
+      #    -> WICHTIG: Dies ist die gleiche Toolchain, die du bereits für
+      #    -> ftdi_sio.ko und cp210x.ko verwendet hast!
+      #    -> Falls du eine andere Toolchain nutzt, passe die URL an.
+      # ======================================================================
+      - name: Download Synology Toolchain (Braswell)
+        run: |
+          # Toolchain für Braswell (DSM 7.3.2, Kernel 3.10.108)
+          # TIPP: Nutze die gleiche Toolchain wie für deine USB-Serial-Treiber!
+          wget https://sourceforge.net/projects/dsgpl/files/Tool%20Chain/7.0%20Tool%20Chain/x86_64-gcc920_glibc225_x32_braswell-GPL.tgz/download -O toolchain.tgz
+          tar -xzf toolchain.tgz -C /opt
+          echo "/opt/x86_64-gcc920_glibc225_x32_braswell-GPL/usr/local/x86_64-pc-linux-gnu/bin" >> $GITHUB_PATH
+          echo "CC=x86_64-pc-linux-gnu-gcc" >> $GITHUB_ENV
+
+      # ======================================================================
+      # 4. KERNEL-SOURCES KLONEN (3.10.108)
+      # ======================================================================
+      - name: Clone Synology Kernel (3.10.108)
+        run: |
+          git clone --depth 1 --branch braswell https://github.com/synology-open-source/linux-3.10.108.git
+          cd linux-3.10.108
+          # Minimale .config für Bluetooth-Module
+          cat << 'EOF' > .config
+          CONFIG_MODULES=y
+          CONFIG_BT=y
+          CONFIG_BT_USB=y
+          CONFIG_BT_RFCOMM=y
+          CONFIG_BT_HCIUART=y
+          CONFIG_USB=y
+          CONFIG_USB_HID=y
+          EOF
+          make ARCH=x86_64 olddefconfig
+          make ARCH=x86_64 prepare
+          make ARCH=x86_64 scripts
+
+      # ======================================================================
+      # 5. BLUETOOTH-MODULE KOMPILIEREN
+      #    -> Diese Module müssen selbst kompiliert werden, da sie im
+      #    -> SynoCommunity-Paket für Braswell/3.10.108 FEHLEN!
+      # ======================================================================
+      - name: Build Bluetooth modules
+        run: |
+          cd linux-3.10.108
+          make ARCH=x86_64 CROSS_COMPILE=x86_64-pc-linux-gnu- \
+            -C $PWD \
+            M=drivers/bluetooth modules
+          make ARCH=x86_64 CROSS_COMPILE=x86_64-pc-linux-gnu- \
+            -C $PWD \
+            M=net/bluetooth modules
+
+      # ======================================================================
+      # 6. MODULE SAMMELN
+      #    -> HINWEIS: Die USB-Serial-Treiber (usbserial.ko, ftdi_sio.ko, cp210x.ko)
+      #    -> stammen aus dem SynoCommunity-Paket und liegen unter:
+      #    -> /volume1/@appstore/synokernel-usbserial/lib/modules/braswell/3.10.108/drivers/usb/serial/
+      #    -> Sie müssen NUR auf die NAS kopiert und geladen werden!
+      # ======================================================================
+      - name: Collect Bluetooth modules
+        run: |
+          mkdir -p modules/bluetooth
+          # Bluetooth-Module (selbst kompiliert)
+          cp linux-3.10.108/drivers/bluetooth/btusb.ko modules/bluetooth/
+          cp linux-3.10.108/net/bluetooth/bluetooth.ko modules/bluetooth/
+          cp linux-3.10.108/net/bluetooth/rfcomm.ko modules/bluetooth/
+          cp linux-3.10.108/net/bluetooth/hci_ldisc.ko modules/bluetooth/
+          strip --strip-unneeded modules/bluetooth/*.ko
+
+          # ==============================================================
+          # OPTIONAL: Falls du die USB-Serial-Treiber auch in diesem Workflow
+          # bundeln möchtest, kopiere sie hier aus dem SynoCommunity-Paket.
+          # ABER: Es ist einfacher, sie direkt von der NAS zu kopieren!
+          # ==============================================================
+          # mkdir -p modules/usb-serial
+          # cp /volume1/@appstore/synokernel-usbserial/lib/modules/braswell/3.10.108/drivers/usb/serial/*.ko modules/usb-serial/
+
+      # ======================================================================
+      # 7. ARTIFACT HOCHLADEN
+      #    -> Enthält NUR die Bluetooth-Module!
+      #    -> Die USB-Serial-Treiber kommen aus dem SynoCommunity-Paket!
+      # ======================================================================
+      - name: Upload Bluetooth modules as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: braswell-bluetooth-modules
+          path: modules/bluetooth/
+          retention-days: 30
