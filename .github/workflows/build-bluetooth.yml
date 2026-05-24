@@ -1,4 +1,4 @@
-name: Build Bluetooth Modules for Synology Braswell (3.10.108)
+name: Build Bluetooth Modules via pkgscripts-ng (DSM 7.2, Braswell)
 
 on:
   workflow_dispatch:
@@ -7,58 +7,80 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: alpine:3.18
+    runs-on: ubuntu-20.04  # Ubuntu (nicht Alpine!) für pkgscripts-ng
+    container: false  # Kein Container – direkt auf Ubuntu
 
     steps:
+      # ======================================================================
+      # 1. ABHÄNGIGKEITEN INSTALLIEREN (für pkgscripts-ng)
+      # ======================================================================
       - name: Install dependencies
         run: |
-          apk add --no-cache git make g++ linux-headers bc bison flex zlib-dev python3 wget tar xz
+          sudo apt-get update
+          sudo apt-get install -y git fakeroot build-essential ncurses-dev \
+            xz-utils libssl-dev bc flex libelf-dev bison wget python3
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download Synology Toolchain (Braswell, DSM 7.1)
+      # ======================================================================
+      # 2. PKGSCRIPTS-NG KLONEN UND EINRICHTEN (DSM 7.2, BRASWELL)
+      #    -> Lädt AUTOMATISCH Toolchain + Kernel-Header aus Synologys Quellen!
+      # ======================================================================
+      - name: Setup pkgscripts-ng
         run: |
-          wget https://sourceforge.net/projects/dsgpl/files/Tool%20Chain/7.1%20Tool%20Chain/x86_64-gcc920_glibc225_x32_braswell-GPL.tgz/download -O toolchain.tgz
-          tar -xzf toolchain.tgz -C /opt
-          echo "/opt/x86_64-gcc920_glibc225_x32_braswell-GPL/usr/local/x86_64-pc-linux-gnu/bin" >> $GITHUB_PATH
-          echo "CC=x86_64-pc-linux-gnu-gcc" >> $GITHUB_ENV
+          mkdir -p /toolkit
+          cd /toolkit
+          git clone https://github.com/SynologyOpenSource/pkgscripts-ng
+          cd pkgscripts-ng
+          git checkout DSM7.2
+          # EnvDeploy ausführen (lädt Toolchain + Kernel-Header für Braswell/7.2)
+          sudo ./EnvDeploy -v 7.2 -p braswell
 
-      - name: Clone Synology Kernel (3.10.108)
+      # ======================================================================
+      # 3. UMGEBUNGSVARIABLEN AUS PKGSCRIPTS-NG LADEN
+      # ======================================================================
+      - name: Load build environment
         run: |
-          git clone --depth 1 --branch braswell https://github.com/synology-open-source/linux-3.10.108.git
-          cd linux-3.10.108
-          cat << 'EOF' > .config
-          CONFIG_MODULES=y
-          CONFIG_BT=y
-          CONFIG_BT_USB=y
-          CONFIG_BT_RFCOMM=y
-          CONFIG_BT_HCIUART=y
-          CONFIG_USB=y
-          CONFIG_USB_HID=y
-          EOF
-          make ARCH=x86_64 olddefconfig
-          make ARCH=x86_64 prepare
-          make ARCH=x86_64 scripts
+          # Pfad zur Build-Umgebung
+          BUILD_ENV="/toolkit/build_env/ds.braswell-7.2"
+          # Umgebungsvariablen aus pkgscripts-ng laden
+          source ${BUILD_ENV}/env.sh
+          # Pfade für Toolchain und Kernel-Header setzen
+          echo "TOOLCHAIN_PATH=${BUILD_ENV}/usr/local/x86_64-pc-linux-gnu/bin" >> $GITHUB_ENV
+          echo "KERNEL_SRC=${BUILD_ENV}/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/src/linux" >> $GITHUB_ENV
+          echo "MODULES_DIR=${BUILD_ENV}/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-7.2/build" >> $GITHUB_ENV
 
+      # ======================================================================
+      # 4. BLUETOOTH-MODULE KOMPILIEREN
+      # ======================================================================
       - name: Build Bluetooth modules
         run: |
-          cd linux-3.10.108
-          make ARCH=x86_64 CROSS_COMPILE=x86_64-pc-linux-gnu- -C $PWD M=drivers/bluetooth modules
-          make ARCH=x86_64 CROSS_COMPILE=x86_64-pc-linux-gnu- -C $PWD M=net/bluetooth modules
+          # Toolchain-Pfad zur PATH hinzufügen
+          echo "${{ env.TOOLCHAIN_PATH }}" >> $GITHUB_PATH
+          # Module kompilieren
+          cd ${{ env.KERNEL_SRC }}
+          make -C ${{ env.MODULES_DIR }} \
+            M=${{ env.KERNEL_SRC }}/net/bluetooth \
+            -e CONFIG_BT=m modules
+          make -C ${{ env.MODULES_DIR }} \
+            M=${{ env.KERNEL_SRC }}/drivers/bluetooth \
+            -e CONFIG_BT_HCIBTUSB=m modules
 
+      # ======================================================================
+      # 5. MODULE SAMMELN
+      # ======================================================================
       - name: Collect modules
         run: |
           mkdir -p modules/bluetooth
-          cp linux-3.10.108/drivers/bluetooth/btusb.ko modules/bluetooth/
-          cp linux-3.10.108/net/bluetooth/bluetooth.ko modules/bluetooth/
-          cp linux-3.10.108/net/bluetooth/rfcomm.ko modules/bluetooth/
-          cp linux-3.10.108/net/bluetooth/hci_ldisc.ko modules/bluetooth/
+          cp ${{ env.KERNEL_SRC }}/net/bluetooth/bluetooth.ko modules/bluetooth/
+          cp ${{ env.KERNEL_SRC }}/net/bluetooth/rfcomm.ko modules/bluetooth/
+          cp ${{ env.KERNEL_SRC }}/drivers/bluetooth/btusb.ko modules/bluetooth/
+          cp ${{ env.KERNEL_SRC }}/net/bluetooth/hci_ldisc.ko modules/bluetooth/
+          # Module strippen (optional)
           strip --strip-unneeded modules/bluetooth/*.ko
 
-      - name: Upload Bluetooth modules as artifact
+      # ======================================================================
+      # 6. ARTIFACT HOCHLADEN
+      # ======================================================================
+      - name: Upload Bluetooth modules
         uses: actions/upload-artifact@v4
         with:
           name: braswell-bluetooth-modules
