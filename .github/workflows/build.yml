@@ -13,27 +13,26 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev bc flex bison libelf-dev
+          sudo apt-get install -y build-essential libssl-dev bc flex bison libelf-dev xz-utils
 
-      - name: Download Synology GPL source
+      - name: Download Synology Braswell kernel source
         run: |
-          wget -q "https://global.synologydownload.com/download/ToolChain/Synology NAS GPL Source/7.2-64570/braswell-source.txz" -O braswell-source.txz || \
-          wget -q "https://global.synologydownload.com/download/ToolChain/Synology%20NAS%20GPL%20Source/7.2-64570/braswell-source.txz" -O braswell-source.txz
-          tar xf braswell-source.txz
+          wget -q "https://global.synologydownload.com/download/ToolChain/Synology%20NAS%20GPL%20Source/7.2-64570/braswell/linux-3.10.x.txz" -O linux-3.10.x.txz
+          tar xf linux-3.10.x.txz
 
-      - name: Build modules
+      - name: Build USB serial modules
         run: |
           cd linux-3.10.x
           cp synoconfigs/braswell .config
-          make oldconfig < /dev/null
-          make prepare
-          make scripts
-          make M=drivers/usb/serial modules
-          
+          make ARCH=x86_64 oldconfig < /dev/null
+          make ARCH=x86_64 prepare
+          make ARCH=x86_64 scripts
+          make ARCH=x86_64 M=drivers/usb/serial modules
+
       - name: Collect modules
         run: |
           mkdir -p output
-          find linux-3.10.x/drivers/usb/serial -name "*.ko" | xargs -I{} cp {} output/
+          find linux-3.10.x/drivers/usb/serial -name "*.ko" -exec cp {} output/ \;
           ls -la output/
 
       - name: Upload artifacts
