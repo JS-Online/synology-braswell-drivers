@@ -1,0 +1,43 @@
+name: Build Synology Braswell DSM 7 Drivers
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev bc flex bison libelf-dev
+
+      - name: Download Synology GPL source
+        run: |
+          wget -q "https://global.synologydownload.com/download/ToolChain/Synology NAS GPL Source/7.2-64570/braswell-source.txz" -O braswell-source.txz || \
+          wget -q "https://global.synologydownload.com/download/ToolChain/Synology%20NAS%20GPL%20Source/7.2-64570/braswell-source.txz" -O braswell-source.txz
+          tar xf braswell-source.txz
+
+      - name: Build modules
+        run: |
+          cd linux-3.10.x
+          cp synoconfigs/braswell .config
+          make oldconfig < /dev/null
+          make prepare
+          make scripts
+          make M=drivers/usb/serial modules
+          
+      - name: Collect modules
+        run: |
+          mkdir -p output
+          find linux-3.10.x/drivers/usb/serial -name "*.ko" | xargs -I{} cp {} output/
+          ls -la output/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: braswell-dsm7-drivers
+          path: output/*.ko
