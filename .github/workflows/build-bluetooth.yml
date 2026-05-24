@@ -14,19 +14,16 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          apk add --no-cache \
-            git make g++ linux-headers bc bison flex \
-            zlib-dev python3 py3-pip wget tar xz
+          apk add --no-cache git make g++ linux-headers bc bison flex zlib-dev python3 wget tar xz
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Synology Toolchain (Braswell, DSM 7.2)
+      - name: Download Synology Toolchain (Braswell, DSM 7.1)
         run: |
-          # 🔹 DSM 7.2 Toolchain für Braswell (passend zu Kernel 3.10.108)
-          wget https://sourceforge.net/projects/dsgpl/files/Tool%20Chain/7.2%20Tool%20Chain/x86_64-gcc1100_glibc234_x32_braswell-GPL.tgz/download -O toolchain.tgz
+          wget https://sourceforge.net/projects/dsgpl/files/Tool%20Chain/7.1%20Tool%20Chain/x86_64-gcc920_glibc225_x32_braswell-GPL.tgz/download -O toolchain.tgz
           tar -xzf toolchain.tgz -C /opt
-          echo "/opt/x86_64-gcc1100_glibc234_x32_braswell-GPL/usr/local/x86_64-pc-linux-gnu/bin" >> $GITHUB_PATH
+          echo "/opt/x86_64-gcc920_glibc225_x32_braswell-GPL/usr/local/x86_64-pc-linux-gnu/bin" >> $GITHUB_PATH
           echo "CC=x86_64-pc-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Clone Synology Kernel (3.10.108)
@@ -60,10 +57,6 @@ jobs:
           cp linux-3.10.108/net/bluetooth/rfcomm.ko modules/bluetooth/
           cp linux-3.10.108/net/bluetooth/hci_ldisc.ko modules/bluetooth/
           strip --strip-unneeded modules/bluetooth/*.ko
-
-          # HINWEIS: USB-Serial-Treiber (usbserial.ko, ftdi_sio.ko, cp210x.ko)
-          # kommen aus dem SynoCommunity-Paket unter:
-          # /volume1/@appstore/synokernel-usbserial/lib/modules/braswell/3.10.108/drivers/usb/serial/
 
       - name: Upload Bluetooth modules as artifact
         uses: actions/upload-artifact@v4
