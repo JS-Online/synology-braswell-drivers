@@ -1,88 +1,51 @@
-name: Build Bluetooth Modules via pkgscripts-ng (DSM 7.2, Braswell)
+name: Build Synology Braswell Bluetooth Drivers
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # Ubuntu (nicht Alpine!) für pkgscripts-ng
-    container: false  # Kein Container – direkt auf Ubuntu
-
+    runs-on: ubuntu-22.04
     steps:
-      # ======================================================================
-      # 1. ABHÄNGIGKEITEN INSTALLIEREN (für pkgscripts-ng)
-      # ======================================================================
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git fakeroot build-essential ncurses-dev \
-            xz-utils libssl-dev bc flex libelf-dev bison wget python3
+          sudo apt-get install -y build-essential libssl-dev bc flex bison \
+            libelf-dev xz-utils gcc-9 g++-9
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
 
-      # ======================================================================
-      # 2. PKGSCRIPTS-NG KLONEN UND EINRICHTEN (DSM 7.2, BRASWELL)
-      #    -> Lädt AUTOMATISCH Toolchain + Kernel-Header aus Synologys Quellen!
-      # ======================================================================
-      - name: Setup pkgscripts-ng
+      - name: Download Synology Braswell kernel source
         run: |
-          mkdir -p /toolkit
-          cd /toolkit
-          git clone https://github.com/SynologyOpenSource/pkgscripts-ng
-          cd pkgscripts-ng
-          git checkout DSM7.2
-          # EnvDeploy ausführen (lädt Toolchain + Kernel-Header für Braswell/7.2)
-          sudo ./EnvDeploy -v 7.2 -p braswell
+          wget -q "https://global.synologydownload.com/download/ToolChain/Synology%20NAS%20GPL%20Source/7.2-64570/braswell/linux-3.10.x.txz" -O linux-3.10.x.txz
+          tar xf linux-3.10.x.txz
 
-      # ======================================================================
-      # 3. UMGEBUNGSVARIABLEN AUS PKGSCRIPTS-NG LADEN
-      # ======================================================================
-      - name: Load build environment
+      - name: Prepare kernel
         run: |
-          # Pfad zur Build-Umgebung
-          BUILD_ENV="/toolkit/build_env/ds.braswell-7.2"
-          # Umgebungsvariablen aus pkgscripts-ng laden
-          source ${BUILD_ENV}/env.sh
-          # Pfade für Toolchain und Kernel-Header setzen
-          echo "TOOLCHAIN_PATH=${BUILD_ENV}/usr/local/x86_64-pc-linux-gnu/bin" >> $GITHUB_ENV
-          echo "KERNEL_SRC=${BUILD_ENV}/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/src/linux" >> $GITHUB_ENV
-          echo "MODULES_DIR=${BUILD_ENV}/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-7.2/build" >> $GITHUB_ENV
+          cd linux-3.10.x
+          cp synoconfigs/braswell .config
+          make ARCH=x86_64 CC=gcc-9 oldconfig < /dev/null
+          make ARCH=x86_64 CC=gcc-9 prepare
+          make ARCH=x86_64 CC=gcc-9 scripts
 
-      # ======================================================================
-      # 4. BLUETOOTH-MODULE KOMPILIEREN
-      # ======================================================================
       - name: Build Bluetooth modules
         run: |
-          # Toolchain-Pfad zur PATH hinzufügen
-          echo "${{ env.TOOLCHAIN_PATH }}" >> $GITHUB_PATH
-          # Module kompilieren
-          cd ${{ env.KERNEL_SRC }}
-          make -C ${{ env.MODULES_DIR }} \
-            M=${{ env.KERNEL_SRC }}/net/bluetooth \
-            -e CONFIG_BT=m modules
-          make -C ${{ env.MODULES_DIR }} \
-            M=${{ env.KERNEL_SRC }}/drivers/bluetooth \
-            -e CONFIG_BT_HCIBTUSB=m modules
+          cd linux-3.10.x
+          make ARCH=x86_64 CC=gcc-9 M=net/bluetooth modules
+          make ARCH=x86_64 CC=gcc-9 M=drivers/bluetooth modules
 
-      # ======================================================================
-      # 5. MODULE SAMMELN
-      # ======================================================================
       - name: Collect modules
         run: |
-          mkdir -p modules/bluetooth
-          cp ${{ env.KERNEL_SRC }}/net/bluetooth/bluetooth.ko modules/bluetooth/
-          cp ${{ env.KERNEL_SRC }}/net/bluetooth/rfcomm.ko modules/bluetooth/
-          cp ${{ env.KERNEL_SRC }}/drivers/bluetooth/btusb.ko modules/bluetooth/
-          cp ${{ env.KERNEL_SRC }}/net/bluetooth/hci_ldisc.ko modules/bluetooth/
-          # Module strippen (optional)
-          strip --strip-unneeded modules/bluetooth/*.ko
+          mkdir -p output
+          find linux-3.10.x/net/bluetooth -name "*.ko" -exec cp {} output/ \;
+          find linux-3.10.x/drivers/bluetooth -name "*.ko" -exec cp {} output/ \;
+          ls -la output/
 
-      # ======================================================================
-      # 6. ARTIFACT HOCHLADEN
-      # ======================================================================
-      - name: Upload Bluetooth modules
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: braswell-bluetooth-modules
-          path: modules/bluetooth/
-          retention-days: 30
+          name: braswell-bluetooth-drivers
+          path: output/*.ko
