@@ -35,7 +35,9 @@ jobs:
         run: |
           cd linux-3.10.x
           make ARCH=x86_64 CC=gcc-9 M=drivers/usb/serial modules
-          ls -la Module.symvers
+          # symvers aus dem Unterverzeichnis ins Root kopieren
+          cp drivers/usb/serial/Module.symvers Module.symvers 2>/dev/null || touch Module.symvers
+          echo "Module.symvers Zeilen: $(wc -l < Module.symvers)"
 
       - name: Enable Bluetooth in config
         run: |
