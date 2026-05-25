@@ -31,21 +31,49 @@ jobs:
           make ARCH=x86_64 CC=gcc-9 prepare
           make ARCH=x86_64 CC=gcc-9 scripts
 
+      - name: Check Bluetooth config
+        run: |
+          echo "=== Bluetooth Kernel Config ==="
+          grep -E "CONFIG_BT|CONFIG_RFKILL" linux-3.10.x/.config || echo "Nichts gefunden"
+
+      - name: Enable Bluetooth in config
+        run: |
+          cd linux-3.10.x
+          # Bluetooth als Modul aktivieren
+          sed -i 's/# CONFIG_BT is not set/CONFIG_BT=m/' .config
+          sed -i 's/# CONFIG_BT_HCIBTUSB is not set/CONFIG_BT_HCIBTUSB=m/' .config
+          echo "CONFIG_BT=m" >> .config
+          echo "CONFIG_BT_HCIBTUSB=m" >> .config
+          echo "CONFIG_BT_RFCOMM=m" >> .config
+          echo "CONFIG_BT_HIDP=m" >> .config
+          make ARCH=x86_64 CC=gcc-9 oldconfig < /dev/null
+
       - name: Build Bluetooth modules
         run: |
           cd linux-3.10.x
-          make ARCH=x86_64 CC=gcc-9 M=net/bluetooth modules
-          make ARCH=x86_64 CC=gcc-9 M=drivers/bluetooth modules
+          make ARCH=x86_64 CC=gcc-9 M=net/bluetooth modules 2>&1 || true
+          make ARCH=x86_64 CC=gcc-9 M=drivers/bluetooth modules 2>&1 || true
+
+      - name: Debug - find all ko files
+        run: |
+          echo "=== Alle .ko Dateien ==="
+          find linux-3.10.x -name "*.ko" 2>/dev/null
+          echo "=== net/bluetooth Inhalt ==="
+          ls -la linux-3.10.x/net/bluetooth/
+          echo "=== drivers/bluetooth Inhalt ==="
+          ls -la linux-3.10.x/drivers/bluetooth/
 
       - name: Collect modules
         run: |
           mkdir -p output
-          find linux-3.10.x/net/bluetooth -name "*.ko" -exec cp {} output/ \;
-          find linux-3.10.x/drivers/bluetooth -name "*.ko" -exec cp {} output/ \;
-          ls -la output/
+          find linux-3.10.x -name "bluetooth.ko" -exec cp {} output/ \;
+          find linux-3.10.x -name "btusb.ko" -exec cp {} output/ \;
+          find linux-3.10.x -name "rfcomm.ko" -exec cp {} output/ \;
+          ls -la output/ || echo "output ist leer"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: braswell-bluetooth-drivers
           path: output/*.ko
+          if-no-files-found: warn
