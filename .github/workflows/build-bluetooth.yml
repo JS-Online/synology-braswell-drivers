@@ -23,30 +23,30 @@ jobs:
           wget -q "https://global.synologydownload.com/download/ToolChain/Synology%20NAS%20GPL%20Source/7.2-64570/braswell/linux-3.10.x.txz" -O linux-3.10.x.txz
           tar xf linux-3.10.x.txz
 
-      - name: Prepare kernel
+      - name: Prepare kernel with Bluetooth enabled
         run: |
           cd linux-3.10.x
           cp synoconfigs/braswell .config
+
+          # Bluetooth VOR oldconfig/prepare aktivieren!
+          sed -i 's/# CONFIG_BT is not set/CONFIG_BT=m/' .config
+          echo "CONFIG_BT_RFCOMM=m" >> .config
+          echo "CONFIG_BT_HIDP=m" >> .config
+          echo "CONFIG_BT_HCIBTUSB=m" >> .config
+
           make ARCH=x86_64 CC=gcc-9 oldconfig < /dev/null
           make ARCH=x86_64 CC=gcc-9 prepare
           make ARCH=x86_64 CC=gcc-9 scripts
 
-      - name: Generate Module.symvers via USB serial build
+          # Prüfen ob BT in autoconf.h gelandet ist
+          grep -i "CONFIG_BT" include/generated/autoconf.h || echo "FEHLER: BT nicht in autoconf.h!"
+
+      - name: Generate Module.symvers
         run: |
           cd linux-3.10.x
           make ARCH=x86_64 CC=gcc-9 M=drivers/usb/serial modules
-          # symvers aus dem Unterverzeichnis ins Root kopieren
           cp drivers/usb/serial/Module.symvers Module.symvers 2>/dev/null || touch Module.symvers
           echo "Module.symvers Zeilen: $(wc -l < Module.symvers)"
-
-      - name: Enable Bluetooth in config
-        run: |
-          cd linux-3.10.x
-          echo "CONFIG_BT=m" >> .config
-          echo "CONFIG_BT_HCIBTUSB=m" >> .config
-          echo "CONFIG_BT_RFCOMM=m" >> .config
-          echo "CONFIG_BT_HIDP=m" >> .config
-          make ARCH=x86_64 CC=gcc-9 oldconfig < /dev/null
 
       - name: Build Bluetooth modules
         run: |
